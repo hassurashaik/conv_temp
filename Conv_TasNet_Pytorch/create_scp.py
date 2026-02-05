@@ -1,96 +1,41 @@
 import os
 
-train_mix_scp = 'tr_mix.scp'
-train_s1_scp = 'tr_s1.scp'
-train_s2_scp = 'tr_s2.scp'
+# =========================
+# CHANGE THIS ONLY
+# =========================
+DATA_ROOT = r"C:\Users\Shaik\Documents\temp_conv\Conv-TasNet\Conv_TasNet_Pytorch\wsj0-mix\2speakers\wav8k\min"
+OUT_DIR = "scp"
 
-test_mix_scp = 'tt_mix.scp'
-test_s1_scp = 'tt_s1.scp'
-test_s2_scp = 'tt_s2.scp'
+os.makedirs(OUT_DIR, exist_ok=True)
 
-train_mix = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/tr/mix'
-train_s1 = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/tr/s1'
-train_s2 = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/tr/s2'
+def write_scp(folder, scp_path):
+    with open(scp_path, "w") as f:
+        for root, _, files in os.walk(folder):
+            files.sort()
+            for file in files:
+                if file.endswith(".wav"):
+                    full_path = os.path.join(root, file)
+                    f.write(f"{file} {full_path}\n")
 
-test_mix = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/tt/mix'
-test_s1 = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/tt/s1'
-test_s2 = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/tt/s2'
+# =========================
+# TRAIN
+# =========================
+write_scp(os.path.join(DATA_ROOT, "tr", "mix"), os.path.join(OUT_DIR, "tr_mix.scp"))
+write_scp(os.path.join(DATA_ROOT, "tr", "s1"),  os.path.join(OUT_DIR, "tr_s1.scp"))
+write_scp(os.path.join(DATA_ROOT, "tr", "s2"),  os.path.join(OUT_DIR, "tr_s2.scp"))
 
-tr_mix = open(train_mix_scp,'w')
-for root, dirs, files in os.walk(train_mix):
-    files.sort()
-    for file in files:
-        tr_mix.write(file+" "+root+'/'+file)
-        tr_mix.write('\n')
+# =========================
+# VALIDATION
+# =========================
+write_scp(os.path.join(DATA_ROOT, "cv", "mix"), os.path.join(OUT_DIR, "cv_mix.scp"))
+write_scp(os.path.join(DATA_ROOT, "cv", "s1"),  os.path.join(OUT_DIR, "cv_s1.scp"))
+write_scp(os.path.join(DATA_ROOT, "cv", "s2"),  os.path.join(OUT_DIR, "cv_s2.scp"))
 
+# =========================
+# TEST
+# =========================
+write_scp(os.path.join(DATA_ROOT, "tt", "mix"), os.path.join(OUT_DIR, "tt_mix.scp"))
+write_scp(os.path.join(DATA_ROOT, "tt", "s1"),  os.path.join(OUT_DIR, "tt_s1.scp"))
+write_scp(os.path.join(DATA_ROOT, "tt", "s2"),  os.path.join(OUT_DIR, "tt_s2.scp"))
 
-tr_s1 = open(train_s1_scp,'w')
-for root, dirs, files in os.walk(train_s1):
-    files.sort()
-    for file in files:
-        tr_s1.write(file+" "+root+'/'+file)
-        tr_s1.write('\n')
-
-
-tr_s2 = open(train_s2_scp,'w')
-for root, dirs, files in os.walk(train_s2):
-    files.sort()
-    for file in files:
-        tr_s2.write(file+" "+root+'/'+file)
-        tr_s2.write('\n')
-
-
-
-tt_mix = open(test_mix_scp,'w')
-for root, dirs, files in os.walk(test_mix):
-    files.sort()
-    for file in files:
-        tt_mix.write(file+" "+root+'/'+file)
-        tt_mix.write('\n')
-
-
-tt_s1 = open(test_s1_scp,'w')
-for root, dirs, files in os.walk(test_s1):
-    files.sort()
-    for file in files:
-        tt_s1.write(file+" "+root+'/'+file)
-        tt_s1.write('\n')
-
-
-tt_s2 = open(test_s2_scp,'w')
-for root, dirs, files in os.walk(test_s2):
-    files.sort()
-    for file in files:
-        tt_s2.write(file+" "+root+'/'+file)
-        tt_s2.write('\n')
-
-cv_mix_scp = 'cv_mix.scp'
-cv_s1_scp = 'cv_s1.scp'
-cv_s2_scp = 'cv_s2.scp'
-
-cv_mix = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/cv/mix'
-cv_s1 = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/cv/s1'
-cv_s2 = '/home/likai/data1/Dataset/wsj0-mix/2speakers/wav8k/min/cv/s2'
-
-cv_mix_file = open(cv_mix_scp,'w')
-for root, dirs, files in os.walk(cv_mix):
-    files.sort()
-    for file in files:
-        cv_mix_file.write(file+" "+root+'/'+file)
-        cv_mix_file.write('\n')
-
-
-cv_s1_file = open(cv_s1_scp,'w')
-for root, dirs, files in os.walk(cv_s1):
-    files.sort()
-    for file in files:
-        cv_s1_file.write(file+" "+root+'/'+file)
-        cv_s1_file.write('\n')
-
-
-cv_s2_file = open(cv_s2_scp,'w')
-for root, dirs, files in os.walk(cv_s2):
-    files.sort()
-    for file in files:
-        cv_s2_file.write(file+" "+root+'/'+file)
-        cv_s2_file.write('\n')
+print("✅ SCP files generated successfully")
