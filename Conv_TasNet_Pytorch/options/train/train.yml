@@ -1,6 +1,6 @@
 #### Conv-TasNet Setting
 name: Conv_Tasnet
-gpu_ids: []          # CPU only
+gpu_ids: [0]          # CPU only
 epochs: 100
 
 #### Dataset Configure
