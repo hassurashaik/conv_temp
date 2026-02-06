@@ -1,11 +1,11 @@
 #### Conv-TasNet Setting
 name: Conv_Tasnet
-gpu_ids: [0]          # CPU only
+gpu_ids: [0]          # Single GPU (GPU 0)
 epochs: 100
 
 #### Dataset Configure
 datasets:
-  num_workers: 0
+  num_workers: 2      # Safe for single GPU
   batch_size: 4
   fs: 8000
   chunk_len: 3
@@ -40,19 +40,20 @@ optimizer_kwargs:
   lr: !!float 1e-3
   weight_decay: !!float 1e-5
 
-#### Network configure
+#### Network configure (OPTIMIZED)
 net_conf:
   n_fft: 256
   hop_length: 64
-  B: 128
-  H: 512
+
+  B: 64        # bottleneck channels (↓ memory + faster)
+  H: 176       # TCN hidden channels (↓ from 512)
   P: 3
-  X: 8
-  R: 3
+  X: 5         # blocks per repeat (↓ from 8)
+  R: 2         # repeats (↓ from 3)
+
   num_spks: 2
   norm: gln
   causal: false
-
 
 #### Resume model
 resume:
