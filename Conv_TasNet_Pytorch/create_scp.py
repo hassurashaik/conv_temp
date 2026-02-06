@@ -3,7 +3,7 @@ import os
 # =========================
 # CHANGE THIS ONLY
 # =========================
-DATA_ROOT = r"C:\Users\Shaik\Documents\temp_conv\Conv-TasNet\Conv_TasNet_Pytorch\wsj0-mix\2speakers\wav8k\min"
+DATA_ROOT = r"/content/mix/wsj0-mix/2speakers/wav8k/min"
 OUT_DIR = "scp"
 
 os.makedirs(OUT_DIR, exist_ok=True)
