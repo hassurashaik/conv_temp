@@ -8,8 +8,8 @@ datasets:
   num_workers: 0
   batch_size: 4
   fs: 8000
-  chunk_len: 4
-  chunk_size: 32000   # 4 sec × 8kHz
+  chunk_len: 3
+  chunk_size: 24000   # 3 sec × 8kHz
 
   train:
     mix_scp: ./scp/tr_mix.scp
