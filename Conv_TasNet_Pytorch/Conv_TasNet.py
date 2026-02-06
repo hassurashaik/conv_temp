@@ -95,20 +95,24 @@ class ConvTasNet(nn.Module):
         self.num_spks = num_spks
         self.freq_bins = n_fft // 2 + 1
 
+        # ✅ Correct place for window
+        self.register_buffer("window", torch.hann_window(n_fft))
+
         # Bottleneck
         self.layer_norm = select_norm("cln", self.freq_bins)
         self.bottleneck = nn.Conv1d(self.freq_bins, B, 1)
 
-        # TCN (R repeats × X blocks)
+        # TCN
         blocks = []
         for _ in range(R):
             for i in range(X):
                 blocks.append(
                     Conv1D_Block(
-                        B, H, kernel_size=P,
+                        B, H,
+                        kernel_size=P,
                         dilation=2 ** i,
                         norm=norm,
-                        causal=causal
+                        causal=causal,
                     )
                 )
         self.tcn = nn.Sequential(*blocks)
@@ -125,8 +129,9 @@ class ConvTasNet(nn.Module):
             x,
             n_fft=self.n_fft,
             hop_length=self.hop,
+            window=self.window,
             return_complex=True,
-            center=False,
+            center=True,
         )
 
         mag = torch.abs(X)
@@ -150,8 +155,9 @@ class ConvTasNet(nn.Module):
                 est_complex,
                 n_fft=self.n_fft,
                 hop_length=self.hop,
+                window=self.window,
                 length=x.shape[-1],
-                center=False,
+                center=True,
             )
             outputs.append(wav)
 
