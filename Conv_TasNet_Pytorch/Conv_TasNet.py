@@ -79,11 +79,11 @@ class ConvTasNet(nn.Module):
         self,
         n_fft=256,
         hop_length=64,
-        B=64,        # bottleneck channels
-        H=176,       # TCN hidden channels
+        B=96,        # bottleneck channels
+        H=256,       # TCN hidden channels
         P=3,
-        X=5,         # blocks per repeat
-        R=2,         # repeats
+        X=7,         # blocks per repeat
+        R=3,         # repeats
         num_spks=2,
         norm="gln",
         causal=False,
