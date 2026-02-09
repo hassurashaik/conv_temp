@@ -22,7 +22,7 @@ class Trainer:
         train_dataloader,
         val_dataloader,
         checkpoint="checkpoint",
-        lr=1e-3,
+        lr=5e-4,                 # ✅ UPDATED LR
         clip_norm=5.0,
         patience=3,
         factor=0.5,
@@ -122,11 +122,18 @@ class Trainer:
                 losses.append(loss.item())
 
         avg_loss = sum(losses) / len(losses)
+
         self.logger.info(
             f"Epoch {self.cur_epoch:03d} VAL   | "
             f"Loss {avg_loss:.4f} | "
             f"Time {(time.time() - start)/60:.2f} min"
         )
+
+        # ✅ ADDED: log LR after scheduler decision
+        self.logger.info(
+            f"LR after scheduler: {self.optimizer.param_groups[0]['lr']:.3e}"
+        )
+
         return avg_loss
 
     # ---------------------------------------------------
