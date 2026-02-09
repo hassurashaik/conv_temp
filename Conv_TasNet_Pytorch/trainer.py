@@ -2,19 +2,36 @@ import torch
 import time
 import os
 import matplotlib.pyplot as plt
+
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.cuda.amp import autocast, GradScaler
 
 from SI_SNR import si_snr_loss
 from Conv_TasNet import check_parameters
 from utils import get_logger
 
 
+# -----------------------------
+# Move batch to CPU
+# -----------------------------
 def to_device(batch, device):
-    return {k: v.to(device) for k, v in batch.items()}
+    def move(x):
+        if torch.is_tensor(x):
+            return x.to(device)
+        elif isinstance(x, list):
+            return [move(i) for i in x]
+        elif isinstance(x, tuple):
+            return tuple(move(i) for i in x)
+        else:
+            return x
+
+    return {k: move(v) for k, v in batch.items()}
 
 
+
+# =============================
+# Trainer (CPU RESUME)
+# =============================
 class Trainer:
     def __init__(
         self,
@@ -22,7 +39,7 @@ class Trainer:
         train_dataloader,
         val_dataloader,
         checkpoint="checkpoint",
-        lr=5e-4,                 # ✅ UPDATED LR
+        lr=5e-4,
         clip_norm=5.0,
         patience=3,
         factor=0.5,
@@ -30,40 +47,82 @@ class Trainer:
         num_epochs=100,
         log_interval=100,
     ):
-        assert torch.cuda.is_available(), "CUDA is required"
+        # -----------------------------
+        # Logger & checkpoint dir
+        # -----------------------------
+        os.makedirs(checkpoint, exist_ok=True)
+        self.checkpoint = checkpoint
+        self.logger = get_logger(os.path.join(checkpoint, "trainer.log"))
 
-        self.device = torch.device("cuda")
+        # -----------------------------
+        # FORCE CPU
+        # -----------------------------
+        self.device = torch.device("cpu")
         self.net = net.to(self.device)
 
+        self.logger.info("🖥️ Running on CPU (resume enabled)")
+
+        self.logger.info(
+            f"Model params: {check_parameters(self.net):.2f} M"
+        )
+
+        # -----------------------------
+        # Data
+        # -----------------------------
         self.train_loader = train_dataloader
         self.val_loader = val_dataloader
 
+        # -----------------------------
+        # Optimizer & scheduler
+        # -----------------------------
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
+
         self.scheduler = ReduceLROnPlateau(
             self.optimizer,
             mode="min",
             factor=factor,
             patience=patience,
             min_lr=min_lr,
-            verbose=True,
+            
         )
 
-        self.scaler = GradScaler()
+        # -----------------------------
+        # Training config
+        # -----------------------------
         self.clip_norm = clip_norm
         self.num_epochs = num_epochs
         self.log_interval = log_interval
         self.cur_epoch = 0
 
-        os.makedirs(checkpoint, exist_ok=True)
-        self.checkpoint = checkpoint
-        self.logger = get_logger(os.path.join(checkpoint, "trainer.log"))
+    # ---------------------------------------------------
+    # Load checkpoint (GPU → CPU safe)
+    # ---------------------------------------------------
+    def load(self, path):
+        ckpt = torch.load(path, map_location="cpu")
+
+        self.net.load_state_dict(ckpt["model"])
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+        self.cur_epoch = ckpt["epoch"]
 
         self.logger.info(
-            f"Model params: {check_parameters(self.net):.2f} M"
+            f"✅ Resumed training on CPU from '{path}' at epoch {self.cur_epoch}"
         )
 
     # ---------------------------------------------------
-    # Train one epoch
+    # Save checkpoint
+    # ---------------------------------------------------
+    def save(self, name):
+        torch.save(
+            {
+                "epoch": self.cur_epoch,
+                "model": self.net.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+            },
+            os.path.join(self.checkpoint, name),
+        )
+
+    # ---------------------------------------------------
+    # Train one epoch (CPU)
     # ---------------------------------------------------
     def train_epoch(self):
         self.net.train()
@@ -72,22 +131,17 @@ class Trainer:
 
         for step, batch in enumerate(self.train_loader, 1):
             batch = to_device(batch, self.device)
+            self.optimizer.zero_grad()
 
-            self.optimizer.zero_grad(set_to_none=True)
+            ests = self.net(batch["mix"])
+            loss = si_snr_loss(ests, batch)
 
-            with autocast():
-                ests = self.net(batch["mix"])
-                loss = si_snr_loss(ests, batch)
-
-            self.scaler.scale(loss).backward()
+            loss.backward()
 
             if self.clip_norm:
-                self.scaler.unscale_(self.optimizer)
                 clip_grad_norm_(self.net.parameters(), self.clip_norm)
 
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-
+            self.optimizer.step()
             losses.append(loss.item())
 
             if step % self.log_interval == 0:
@@ -107,7 +161,7 @@ class Trainer:
         return avg_loss
 
     # ---------------------------------------------------
-    # Validation
+    # Validation (CPU)
     # ---------------------------------------------------
     def validate(self):
         self.net.eval()
@@ -129,7 +183,6 @@ class Trainer:
             f"Time {(time.time() - start)/60:.2f} min"
         )
 
-        # ✅ ADDED: log LR after scheduler decision
         self.logger.info(
             f"LR after scheduler: {self.optimizer.param_groups[0]['lr']:.3e}"
         )
@@ -137,27 +190,14 @@ class Trainer:
         return avg_loss
 
     # ---------------------------------------------------
-    # Checkpoint
-    # ---------------------------------------------------
-    def save(self, name):
-        torch.save(
-            {
-                "epoch": self.cur_epoch,
-                "model": self.net.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
-            },
-            os.path.join(self.checkpoint, name),
-        )
-
-    # ---------------------------------------------------
-    # Run training
+    # Training loop
     # ---------------------------------------------------
     def run(self):
         train_losses, val_losses = [], []
         best_loss = float("inf")
         no_improve = 0
 
-        for epoch in range(1, self.num_epochs + 1):
+        for epoch in range(self.cur_epoch + 1, self.num_epochs + 1):
             self.cur_epoch = epoch
 
             train_loss = self.train_epoch()
@@ -179,13 +219,13 @@ class Trainer:
             self.save("last.pt")
 
             if no_improve >= 10:
-                self.logger.info("⛔ Early stopping")
+                self.logger.info("⛔ Early stopping triggered")
                 break
 
         self.plot_losses(train_losses, val_losses)
 
     # ---------------------------------------------------
-    # Plot loss
+    # Plot loss curves
     # ---------------------------------------------------
     def plot_losses(self, train_losses, val_losses):
         plt.figure()
@@ -195,3 +235,4 @@ class Trainer:
         plt.ylabel("Loss")
         plt.legend()
         plt.savefig(os.path.join(self.checkpoint, "loss_curve.png"))
+        plt.close()
