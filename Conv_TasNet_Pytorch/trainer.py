@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.amp import autocast, GradScaler
+
 
 from SI_SNR import si_snr_loss
 from Conv_TasNet import check_parameters
@@ -12,7 +14,7 @@ from utils import get_logger
 
 
 # -----------------------------
-# Move batch to CPU
+# Move batch to device (robust)
 # -----------------------------
 def to_device(batch, device):
     def move(x):
@@ -28,9 +30,8 @@ def to_device(batch, device):
     return {k: move(v) for k, v in batch.items()}
 
 
-
 # =============================
-# Trainer (CPU RESUME)
+# Trainer (AUTO GPU + DRIVE SAVE)
 # =============================
 class Trainer:
     def __init__(
@@ -38,7 +39,7 @@ class Trainer:
         net,
         train_dataloader,
         val_dataloader,
-        checkpoint="checkpoint",
+        checkpoint="/content/drive/MyDrive/ConvTasNet/checkpoints",
         lr=5e-4,
         clip_norm=5.0,
         patience=3,
@@ -55,12 +56,19 @@ class Trainer:
         self.logger = get_logger(os.path.join(checkpoint, "trainer.log"))
 
         # -----------------------------
-        # FORCE CPU
+        # AUTO DEVICE (GPU if available)
         # -----------------------------
-        self.device = torch.device("cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net = net.to(self.device)
 
-        self.logger.info("🖥️ Running on CPU (resume enabled)")
+        self.use_amp = (self.device.type == "cuda")
+        self.scaler = GradScaler("cuda", enabled=self.use_amp)
+
+
+        if self.device.type == "cuda":
+            self.logger.info("🚀 GPU detected → training on GPU")
+        else:
+            self.logger.info("🖥️ GPU not available → training on CPU")
 
         self.logger.info(
             f"Model params: {check_parameters(self.net):.2f} M"
@@ -83,7 +91,6 @@ class Trainer:
             factor=factor,
             patience=patience,
             min_lr=min_lr,
-            
         )
 
         # -----------------------------
@@ -95,21 +102,21 @@ class Trainer:
         self.cur_epoch = 0
 
     # ---------------------------------------------------
-    # Load checkpoint (GPU → CPU safe)
+    # Load checkpoint (GPU ↔ CPU safe)
     # ---------------------------------------------------
     def load(self, path):
-        ckpt = torch.load(path, map_location="cpu")
+        ckpt = torch.load(path, map_location=self.device)
 
         self.net.load_state_dict(ckpt["model"])
         self.optimizer.load_state_dict(ckpt["optimizer"])
         self.cur_epoch = ckpt["epoch"]
 
         self.logger.info(
-            f"✅ Resumed training on CPU from '{path}' at epoch {self.cur_epoch}"
+            f"✅ Resumed training from '{path}' at epoch {self.cur_epoch}"
         )
 
     # ---------------------------------------------------
-    # Save checkpoint
+    # Save checkpoint (Drive)
     # ---------------------------------------------------
     def save(self, name):
         torch.save(
@@ -122,7 +129,7 @@ class Trainer:
         )
 
     # ---------------------------------------------------
-    # Train one epoch (CPU)
+    # Train one epoch
     # ---------------------------------------------------
     def train_epoch(self):
         self.net.train()
@@ -131,17 +138,30 @@ class Trainer:
 
         for step, batch in enumerate(self.train_loader, 1):
             batch = to_device(batch, self.device)
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
 
-            ests = self.net(batch["mix"])
-            loss = si_snr_loss(ests, batch)
+            with autocast("cuda", enabled=self.use_amp):
 
-            loss.backward()
+                ests = self.net(batch["mix"])
+                loss = si_snr_loss(ests, batch)
 
-            if self.clip_norm:
-                clip_grad_norm_(self.net.parameters(), self.clip_norm)
+            if self.use_amp:
+                self.scaler.scale(loss).backward()
 
-            self.optimizer.step()
+                if self.clip_norm:
+                    self.scaler.unscale_(self.optimizer)
+                    clip_grad_norm_(self.net.parameters(), self.clip_norm)
+
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+            else:
+                loss.backward()
+
+                if self.clip_norm:
+                    clip_grad_norm_(self.net.parameters(), self.clip_norm)
+
+                self.optimizer.step()
+
             losses.append(loss.item())
 
             if step % self.log_interval == 0:
@@ -161,7 +181,7 @@ class Trainer:
         return avg_loss
 
     # ---------------------------------------------------
-    # Validation (CPU)
+    # Validation
     # ---------------------------------------------------
     def validate(self):
         self.net.eval()
@@ -190,12 +210,11 @@ class Trainer:
         return avg_loss
 
     # ---------------------------------------------------
-    # Training loop
+    # Training loop (NO early stopping)
     # ---------------------------------------------------
     def run(self):
         train_losses, val_losses = [], []
         best_loss = float("inf")
-        no_improve = 0
 
         for epoch in range(self.cur_epoch + 1, self.num_epochs + 1):
             self.cur_epoch = epoch
@@ -208,19 +227,14 @@ class Trainer:
 
             self.scheduler.step(val_loss)
 
+            # Save best model
             if val_loss < best_loss:
                 best_loss = val_loss
-                no_improve = 0
                 self.save("best.pt")
                 self.logger.info("✅ New best model saved")
-            else:
-                no_improve += 1
 
+            # Always save last checkpoint
             self.save("last.pt")
-
-            if no_improve >= 10:
-                self.logger.info("⛔ Early stopping triggered")
-                break
 
         self.plot_losses(train_losses, val_losses)
 
