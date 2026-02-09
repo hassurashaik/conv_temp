@@ -45,11 +45,11 @@ net_conf:
   n_fft: 256
   hop_length: 64
 
-  B: 64        # bottleneck channels (↓ memory + faster)
-  H: 176       # TCN hidden channels (↓ from 512)
+  B: 96        # bottleneck channels (↓ memory + faster)
+  H: 256      # TCN hidden channels (↓ from 512)
   P: 3
-  X: 5         # blocks per repeat (↓ from 8)
-  R: 2         # repeats (↓ from 3)
+  X: 7         # blocks per repeat (↓ from 8)
+  R: 3         # repeats (↓ from 3)
 
   num_spks: 2
   norm: gln
