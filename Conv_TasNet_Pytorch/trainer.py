@@ -7,8 +7,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.amp import autocast, GradScaler
 
-
-from SI_SNR import si_snr_loss
+from SI_SNR import pit_si_snr_loss
 from Conv_TasNet import check_parameters
 from utils import get_logger
 
@@ -193,7 +192,7 @@ class Trainer:
             for batch in self.val_loader:
                 batch = to_device(batch, self.device)
                 ests = self.net(batch["mix"])
-                loss = si_snr_loss(ests, batch)
+                loss = pit_si_snr_loss(ests, batch["ref"])
                 losses.append(loss.item())
 
         avg_loss = sum(losses) / len(losses)
