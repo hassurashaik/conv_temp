@@ -50,6 +50,6 @@ net_conf:
 
 #### Resume model
 resume:
-  path: /content/drive/MyDrive/ConvTasNet/checkpoints/best.pt
+  path: /content/drive/MyDrive/ConvTasNet/checkpoints/last.pt
   resume_state: true
 
