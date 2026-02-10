@@ -29,7 +29,7 @@ def main():
     # -----------------------------
     # Parse YAML options
     # -----------------------------
-    opt = parse(args.opt, is_tain=True)
+    opt = parse(args.opt)# ✅ FIXED typo
     logger = get_logger(__name__)
 
     # -----------------------------
@@ -79,15 +79,18 @@ def main():
     )
 
     # -----------------------------
-    # AUTO-RESUME FROM LAST CHECKPOINT
+    # RESUME (YAML CONTROLLED)
     # -----------------------------
-    ckpt_path = os.path.join(opt['train']['checkpoint'], "last.pt")
+    if 'resume' in opt and opt['resume'].get('resume_state', False):
+        ckpt_path = opt['resume'].get('path', None)
 
-    if os.path.exists(ckpt_path):
-        logger.info(f"Resuming training from checkpoint: {ckpt_path}")
-        trainer.load(ckpt_path)
+        if ckpt_path is not None and os.path.exists(ckpt_path):
+            logger.info(f"Resuming training from checkpoint: {ckpt_path}")
+            trainer.load(ckpt_path)
+        else:
+            logger.warning("Resume enabled but checkpoint not found. Training from scratch.")
     else:
-        logger.info("No checkpoint found, starting training from scratch")
+        logger.info("Resume disabled. Training from scratch.")
 
     # -----------------------------
     # Start training
