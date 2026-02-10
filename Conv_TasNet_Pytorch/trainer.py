@@ -1,6 +1,6 @@
-import torch
-import time
 import os
+import time
+import torch
 import matplotlib.pyplot as plt
 
 from torch.nn.utils import clip_grad_norm_
@@ -25,6 +25,7 @@ def to_device(batch, device):
             return tuple(move(i) for i in x)
         else:
             return x
+
     return {k: move(v) for k, v in batch.items()}
 
 
@@ -46,6 +47,9 @@ class Trainer:
         num_epochs,
         log_interval,
     ):
+        # -----------------------------
+        # Checkpoint dir
+        # -----------------------------
         os.makedirs(checkpoint, exist_ok=True)
         self.checkpoint = checkpoint
         self.logger = get_logger(os.path.join(checkpoint, "trainer.log"))
@@ -57,13 +61,9 @@ class Trainer:
         self.net = net.to(self.device)
 
         self.use_amp = (self.device.type == "cuda")
-        self.scaler = GradScaler("cuda", enabled=self.use_amp)
+        self.scaler = GradScaler(enabled=self.use_amp)
 
-        if self.device.type == "cuda":
-            self.logger.info("🚀 GPU detected → training on GPU")
-        else:
-            self.logger.info("🖥️ GPU not available → training on CPU")
-
+        self.logger.info(f"Device: {self.device}")
         self.logger.info(f"Model params: {check_parameters(self.net):.2f} M")
 
         # -----------------------------
@@ -73,7 +73,7 @@ class Trainer:
         self.val_loader = val_dataloader
 
         # -----------------------------
-        # Optimizer & scheduler
+        # Optimizer & Scheduler
         # -----------------------------
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
 
@@ -91,34 +91,55 @@ class Trainer:
         self.clip_norm = clip_norm
         self.num_epochs = num_epochs
         self.log_interval = log_interval
-        self.cur_epoch = 0
 
-        # Debug flag (print shapes once)
+        # Resume-critical state
+        self.start_epoch = 1
+        self.best_loss = float("inf")
+
         self._printed_shapes = False
 
     # ---------------------------------------------------
-    # Load checkpoint (RESUME)
+    # Load checkpoint (BACKWARD COMPATIBLE)
     # ---------------------------------------------------
     def load(self, path):
         ckpt = torch.load(path, map_location=self.device)
 
+        # Required
         self.net.load_state_dict(ckpt["model"])
         self.optimizer.load_state_dict(ckpt["optimizer"])
-        self.cur_epoch = ckpt["epoch"]
+
+        # Optional (old checkpoints may not have these)
+        if "scheduler" in ckpt:
+            self.scheduler.load_state_dict(ckpt["scheduler"])
+        else:
+            self.logger.warning("⚠️ No scheduler state in checkpoint. Using fresh scheduler.")
+
+        if self.use_amp and "scaler" in ckpt and ckpt["scaler"] is not None:
+            self.scaler.load_state_dict(ckpt["scaler"])
+        else:
+            self.logger.warning("⚠️ No AMP scaler state in checkpoint.")
+
+        self.start_epoch = ckpt["epoch"] + 1
+        self.best_loss = ckpt.get("best_loss", float("inf"))
 
         self.logger.info(
-            f"✅ Resumed training from '{path}' at epoch {self.cur_epoch}"
+            f"✅ Resumed from {path} | "
+            f"Start epoch: {self.start_epoch} | "
+            f"Best loss: {self.best_loss:.4f}"
         )
 
     # ---------------------------------------------------
-    # Save checkpoint
+    # Save checkpoint (NEW FORMAT)
     # ---------------------------------------------------
-    def save(self, name):
+    def save(self, name, epoch):
         torch.save(
             {
-                "epoch": self.cur_epoch,
+                "epoch": epoch,
                 "model": self.net.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict(),
+                "scaler": self.scaler.state_dict() if self.use_amp else None,
+                "best_loss": self.best_loss,
             },
             os.path.join(self.checkpoint, name),
         )
@@ -126,7 +147,7 @@ class Trainer:
     # ---------------------------------------------------
     # Train one epoch
     # ---------------------------------------------------
-    def train_epoch(self):
+    def train_epoch(self, epoch):
         self.net.train()
         losses = []
         start = time.time()
@@ -134,37 +155,25 @@ class Trainer:
         for step, batch in enumerate(self.train_loader, 1):
             batch = to_device(batch, self.device)
 
-            # 🔹 DEBUG SHAPES (PRINT ONCE)
             if not self._printed_shapes:
                 self.logger.info(
-                    f"[DEBUG SHAPES] mix: {batch['mix'].shape}, "
-                    f"ref: {batch['ref'].shape}"
+                    f"[DEBUG] mix {batch['mix'].shape}, "
+                    f"ref {batch['ref'].shape}"
                 )
 
             self.optimizer.zero_grad(set_to_none=True)
 
-            with autocast("cuda", enabled=self.use_amp):
-                # IMPORTANT: mix is [B, T] (STFT-based Conv-TasNet)
+            with autocast(device_type="cuda", enabled=self.use_amp):
                 ests = self.net(batch["mix"])
-
-            if not self._printed_shapes:
-                self.logger.info(
-                    f"[DEBUG SHAPES] ests (model output): {ests.shape}"
-                )
-
-                # Safety checks
-                assert batch["mix"].ndim == 2      # [B, T]
-                assert batch["ref"].ndim == 3      # [B, C, T]
-                assert ests.shape == batch["ref"].shape
-
-                self._printed_shapes = True
-
-            loss = pit_si_snr_loss(ests, batch["ref"])
+                loss = pit_si_snr_loss(ests, batch["ref"])
 
             if self.use_amp:
                 self.scaler.scale(loss).backward()
                 self.scaler.unscale_(self.optimizer)
-                clip_grad_norm_(self.net.parameters(), self.clip_norm)
+                clip_grad_norm_(
+                    (p for p in self.net.parameters() if p.grad is not None),
+                    self.clip_norm
+                )
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
@@ -176,24 +185,27 @@ class Trainer:
 
             if step % self.log_interval == 0:
                 self.logger.info(
-                    f"Epoch {self.cur_epoch:03d} | "
+                    f"Epoch {epoch:03d} | "
                     f"Iter {step:05d} | "
                     f"LR {self.optimizer.param_groups[0]['lr']:.3e} | "
                     f"Loss {sum(losses[-self.log_interval:]) / self.log_interval:.4f}"
                 )
 
+            self._printed_shapes = True
+
         avg_loss = sum(losses) / len(losses)
         self.logger.info(
-            f"Epoch {self.cur_epoch:03d} TRAIN | "
+            f"Epoch {epoch:03d} TRAIN | "
             f"Loss {avg_loss:.4f} | "
             f"Time {(time.time() - start)/60:.2f} min"
         )
+
         return avg_loss
 
     # ---------------------------------------------------
     # Validation
     # ---------------------------------------------------
-    def validate(self):
+    def validate(self, epoch):
         self.net.eval()
         losses = []
         start = time.time()
@@ -208,7 +220,7 @@ class Trainer:
         avg_loss = sum(losses) / len(losses)
 
         self.logger.info(
-            f"Epoch {self.cur_epoch:03d} VAL   | "
+            f"Epoch {epoch:03d} VAL   | "
             f"Loss {avg_loss:.4f} | "
             f"Time {(time.time() - start)/60:.2f} min"
         )
@@ -223,38 +235,17 @@ class Trainer:
     # Training loop
     # ---------------------------------------------------
     def run(self):
-        train_losses, val_losses = [], []
-        best_loss = float("inf")
-
-        for epoch in range(self.cur_epoch + 1, self.num_epochs + 1):
-            self.cur_epoch = epoch
-
-            train_loss = self.train_epoch()
-            val_loss = self.validate()
-
-            train_losses.append(train_loss)
-            val_losses.append(val_loss)
+        for epoch in range(self.start_epoch, self.num_epochs + 1):
+            train_loss = self.train_epoch(epoch)
+            val_loss = self.validate(epoch)
 
             self.scheduler.step(val_loss)
 
-            if val_loss < best_loss:
-                best_loss = val_loss
-                self.save("best.pt")
+            if val_loss < self.best_loss:
+                self.best_loss = val_loss
+                self.save("best.pt", epoch)
                 self.logger.info("✅ New best model saved")
 
-            self.save("last.pt")
+            self.save("last.pt", epoch)
 
-        self.plot_losses(train_losses, val_losses)
-
-    # ---------------------------------------------------
-    # Plot loss curves
-    # ---------------------------------------------------
-    def plot_losses(self, train_losses, val_losses):
-        plt.figure()
-        plt.plot(train_losses, label="train")
-        plt.plot(val_losses, label="val")
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.savefig(os.path.join(self.checkpoint, "loss_curve.png"))
-        plt.close()
+        self.logger.info("🎉 Training completed")
