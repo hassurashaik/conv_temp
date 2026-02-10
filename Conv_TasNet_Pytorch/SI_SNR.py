@@ -27,15 +27,15 @@ def pit_si_snr_loss(ests, refs):
     B, C, T = ests.shape
 
     perms = list(permutations(range(C)))
-    losses = []
+    scores = []
 
     for p in perms:
         s = 0
         for i, j in enumerate(p):
             s += si_snr(ests[:, i], refs[:, j])
-        losses.append(s / C)
+        scores.append(s / C)
 
-    loss = torch.stack(losses, dim=1)  # [B, P]
-    max_snr, _ = torch.max(loss, dim=1)
+    scores = torch.stack(scores, dim=1)  # [B, P]
+    max_score, _ = torch.max(scores, dim=1)
 
-    return -max_snr.mean()
+    return -max_score.mean()
