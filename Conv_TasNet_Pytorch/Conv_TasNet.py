@@ -99,7 +99,8 @@ class ConvTasNet(nn.Module):
         self.register_buffer("window", torch.hann_window(n_fft))
 
         # Bottleneck
-        self.layer_norm = select_norm("cln", self.freq_bins)
+        self.layer_norm = GlobalLayerNorm(self.freq_bins)
+
         self.bottleneck = nn.Conv1d(self.freq_bins, B, 1)
 
         # TCN
