@@ -1,8 +1,9 @@
-import torch
 import argparse
-import sys
 import os
+import sys
+import torch
 
+# allow importing from ./options
 sys.path.append('./options')
 
 from trainer import Trainer
@@ -17,8 +18,12 @@ def main():
     # Read arguments
     # -----------------------------
     parser = argparse.ArgumentParser()
-    parser.add_argument('--opt', type=str, required=True,
-                        help='Path to option YAML file')
+    parser.add_argument(
+        '--opt',
+        type=str,
+        required=True,
+        help='Path to option YAML file'
+    )
     args = parser.parse_args()
 
     # -----------------------------
@@ -43,7 +48,7 @@ def main():
         data_kwargs=opt['datasets']['train'],
         num_workers=opt['datasets']['num_workers'],
         chunk_size=opt['datasets']['chunk_size'],
-        batch_size=opt['datasets']['batch_size']
+        batch_size=opt['datasets']['batch_size'],
     )
 
     val_loader = make_dataloader(
@@ -51,7 +56,7 @@ def main():
         data_kwargs=opt['datasets']['val'],
         num_workers=opt['datasets']['num_workers'],
         chunk_size=opt['datasets']['chunk_size'],
-        batch_size=opt['datasets']['batch_size']
+        batch_size=opt['datasets']['batch_size'],
     )
 
     # -----------------------------
@@ -76,15 +81,13 @@ def main():
     # -----------------------------
     # AUTO-RESUME FROM LAST CHECKPOINT
     # -----------------------------
-    ckpt_path = os.path.join(
-    opt['train']['checkpoint'],
-    "last.pt"
-)
+    ckpt_path = os.path.join(opt['train']['checkpoint'], "last.pt")
+
     if os.path.exists(ckpt_path):
-        logger.info(f"Resuming training from {ckpt_path}")
+        logger.info(f"Resuming training from checkpoint: {ckpt_path}")
         trainer.load(ckpt_path)
     else:
-        logger.info("No checkpoint found, starting from scratch")
+        logger.info("No checkpoint found, starting training from scratch")
 
     # -----------------------------
     # Start training
