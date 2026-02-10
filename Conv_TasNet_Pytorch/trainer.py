@@ -142,7 +142,8 @@ class Trainer:
             with autocast("cuda", enabled=self.use_amp):
                 ests = self.net(batch["mix"])
 
-                loss = pit_si_snr_loss(ests, batch["ref"])
+            loss = pit_si_snr_loss(ests, batch["ref"])
+
 
 
             if self.use_amp:
