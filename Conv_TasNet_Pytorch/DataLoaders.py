@@ -93,6 +93,35 @@ class Datasets(Dataset):
 
 
 if __name__ == "__main__":
-    datasets = Datasets('/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_mix.scp',
-                        ['/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_s1.scp', '/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_s2.scp'])
-    print(datasets.key.index('012c020o_1.2887_409o0319_-1.2887.wav'))
+    # Create Dataset
+    dataset = Datasets(
+        "/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_mix.scp",
+        [
+            "/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_s1.scp",
+            "/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_s2.scp",
+        ],
+    )
+
+    # ---- Dataset level (single sample) ----
+    sample = dataset[0]
+    print("\n[Dataset sample]")
+    print("mix shape:", sample["mix"].shape)   # [T]
+    print("ref shape:", sample["ref"].shape)   # [C, T]
+
+    # ---- DataLoader level (batch) ----
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+
+    batch = next(iter(dataloader))
+    mix = batch["mix"]
+    ref = batch["ref"]
+
+    print("\n[DataLoader batch]")
+    print("mix batch shape:", mix.shape)        # [B, T]
+    print("ref batch shape:", ref.shape)        # [B, C, T]
+
+    # ---- After channel dimension ----
+    mix = mix.unsqueeze(1)
+
+    print("\n[After unsqueeze]")
+    print("mix shape:", mix.shape)              # [B, 1, T]
+    print("ref shape:", ref.shape)              # [B, C, T]
