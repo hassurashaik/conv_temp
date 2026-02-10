@@ -141,9 +141,10 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
 
             with autocast("cuda", enabled=self.use_amp):
-
                 ests = self.net(batch["mix"])
-                loss = si_snr_loss(ests, batch)
+
+                loss = pit_si_snr_loss(ests, batch["ref"])
+
 
             if self.use_amp:
                 self.scaler.scale(loss).backward()
