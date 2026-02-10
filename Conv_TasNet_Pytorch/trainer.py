@@ -13,7 +13,7 @@ from utils import get_logger
 
 
 # -----------------------------
-# Move batch to device (robust)
+# Move batch to device
 # -----------------------------
 def to_device(batch, device):
     def move(x):
@@ -30,7 +30,7 @@ def to_device(batch, device):
 
 
 # =============================
-# Trainer (AUTO GPU + DRIVE SAVE)
+# Trainer
 # =============================
 class Trainer:
     def __init__(
@@ -47,43 +47,30 @@ class Trainer:
         num_epochs=100,
         log_interval=100,
     ):
-        # -----------------------------
-        # Logger & checkpoint dir
-        # -----------------------------
         os.makedirs(checkpoint, exist_ok=True)
         self.checkpoint = checkpoint
         self.logger = get_logger(os.path.join(checkpoint, "trainer.log"))
 
-        # -----------------------------
-        # AUTO DEVICE (GPU if available)
-        # -----------------------------
+        # Device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net = net.to(self.device)
 
         self.use_amp = (self.device.type == "cuda")
         self.scaler = GradScaler("cuda", enabled=self.use_amp)
 
-
         if self.device.type == "cuda":
             self.logger.info("🚀 GPU detected → training on GPU")
         else:
             self.logger.info("🖥️ GPU not available → training on CPU")
 
-        self.logger.info(
-            f"Model params: {check_parameters(self.net):.2f} M"
-        )
+        self.logger.info(f"Model params: {check_parameters(self.net):.2f} M")
 
-        # -----------------------------
         # Data
-        # -----------------------------
         self.train_loader = train_dataloader
         self.val_loader = val_dataloader
 
-        # -----------------------------
         # Optimizer & scheduler
-        # -----------------------------
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
-
         self.scheduler = ReduceLROnPlateau(
             self.optimizer,
             mode="min",
@@ -92,30 +79,17 @@ class Trainer:
             min_lr=min_lr,
         )
 
-        # -----------------------------
         # Training config
-        # -----------------------------
         self.clip_norm = clip_norm
         self.num_epochs = num_epochs
         self.log_interval = log_interval
         self.cur_epoch = 0
 
-    # ---------------------------------------------------
-    # Load checkpoint (GPU ↔ CPU safe)
-    # ---------------------------------------------------
-    def load(self, path):
-        ckpt = torch.load(path, map_location=self.device)
-
-        self.net.load_state_dict(ckpt["model"])
-        self.optimizer.load_state_dict(ckpt["optimizer"])
-        self.cur_epoch = ckpt["epoch"]
-
-        self.logger.info(
-            f"✅ Resumed training from '{path}' at epoch {self.cur_epoch}"
-        )
+        # Debug flag
+        self._printed_shapes = False
 
     # ---------------------------------------------------
-    # Save checkpoint (Drive)
+    # Save checkpoint
     # ---------------------------------------------------
     def save(self, name):
         torch.save(
@@ -137,14 +111,33 @@ class Trainer:
 
         for step, batch in enumerate(self.train_loader, 1):
             batch = to_device(batch, self.device)
+
+            # 🔹 DEBUG SHAPES (PRINT ONCE)
+            if not self._printed_shapes:
+                self.logger.info(
+                    f"[DEBUG SHAPES] mix: {batch['mix'].shape}, "
+                    f"ref: {batch['ref'].shape}"
+                )
+
             self.optimizer.zero_grad(set_to_none=True)
 
             with autocast("cuda", enabled=self.use_amp):
+                # IMPORTANT: mix stays [B, T] for STFT-based Conv-TasNet
                 ests = self.net(batch["mix"])
 
+            if not self._printed_shapes:
+                self.logger.info(
+                    f"[DEBUG SHAPES] ests (model output): {ests.shape}"
+                )
+
+                # Correct assertions for THIS repo
+                assert batch["mix"].ndim == 2        # [B, T]
+                assert batch["ref"].ndim == 3        # [B, C, T]
+                assert ests.shape == batch["ref"].shape
+
+                self._printed_shapes = True
+
             loss = pit_si_snr_loss(ests, batch["ref"])
-
-
 
             if self.use_amp:
                 self.scaler.scale(loss).backward()
@@ -157,10 +150,8 @@ class Trainer:
                 self.scaler.update()
             else:
                 loss.backward()
-
                 if self.clip_norm:
                     clip_grad_norm_(self.net.parameters(), self.clip_norm)
-
                 self.optimizer.step()
 
             losses.append(loss.item())
@@ -211,7 +202,7 @@ class Trainer:
         return avg_loss
 
     # ---------------------------------------------------
-    # Training loop (NO early stopping)
+    # Training loop
     # ---------------------------------------------------
     def run(self):
         train_losses, val_losses = [], []
@@ -228,13 +219,11 @@ class Trainer:
 
             self.scheduler.step(val_loss)
 
-            # Save best model
             if val_loss < best_loss:
                 best_loss = val_loss
                 self.save("best.pt")
                 self.logger.info("✅ New best model saved")
 
-            # Always save last checkpoint
             self.save("last.pt")
 
         self.plot_losses(train_losses, val_losses)
