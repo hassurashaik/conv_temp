@@ -1,7 +1,6 @@
 #### Conv-TasNet Setting
 name: Conv_Tasnet
 gpu_ids: [0]
-epochs: 100
 
 #### Dataset Configure
 datasets:
@@ -27,37 +26,29 @@ datasets:
 
 #### Training settings
 train:
-  lr: !!float 5e-4
+  lr: !!float 3e-4
   log_interval: 100
-
-  min_lr: 1e-8
+  min_lr: 1e-6
   patience: 2
   factor: 0.5
-  logging_period: 50
-  clip_norm: 200
+  clip_norm: 5.0
   num_epochs: 100
   checkpoint: /content/drive/MyDrive/ConvTasNet/checkpoints
 
-#### Optimizer kwargs (NO lr here)
-optimizer_kwargs:
-  weight_decay: 1e-5
-
-#### Network configure (OPTIMIZED)
+#### Network configure
 net_conf:
   n_fft: 256
   hop_length: 64
-
   B: 96
   H: 256
   P: 3
   X: 7
   R: 3
-
   num_spks: 2
   norm: gln
   causal: false
 
 #### Resume model
 resume:
-  path: /content/drive/MyDrive/ConvTasNet/checkpoints/last.pt
-  resume_state: true
+  # path: /content/drive/MyDrive/ConvTasNet/checkpoints/last.pt
+  resume_state: false
