@@ -163,7 +163,8 @@ class ConvTasNet(nn.Module):
             )
             outputs.append(wav)
 
-        return outputs
+        return torch.stack(outputs, dim=1)  # [B, num_spks, T]
+
 
 # =========================
 # Utility
