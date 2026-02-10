@@ -74,18 +74,21 @@ class Datasets(Dataset):
 
         refs = []
         for p in ref_paths:
-            r, _ = sf.read(
-                p,
-                start=start,
-                stop=start + self.chunk_size,
-                dtype="float32",
-            )
-            refs.append(torch.from_numpy(r))
+          r, _ = sf.read(
+        p,
+        start=start,
+        stop=start + self.chunk_size,
+        dtype="float32",
+          )
+          refs.append(torch.from_numpy(r))
+
+        refs = torch.stack(refs, dim=0)  # [C, T]
 
         return {
-            "mix": torch.from_numpy(mix),
-            "ref": refs,
-        }
+    "mix": torch.from_numpy(mix),   # [T]
+    "ref": refs,                    # [C, T]
+}
+
 
 
 
