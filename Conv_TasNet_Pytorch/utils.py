@@ -43,4 +43,4 @@ def get_logger(name, format_str="%(asctime)s [%(pathname)s:%(lineno)s - %(leveln
 
 
 if __name__ == "__main__":
-    print(len(handle_scp('/home/likai/data1/create_scp/cv_s2.scp')))
+    print(len(handle_scp("/content/conv_temp/Conv_TasNet_Pytorch/scp/cv_s2.scp")))
