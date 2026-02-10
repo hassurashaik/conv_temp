@@ -25,7 +25,6 @@ def to_device(batch, device):
             return tuple(move(i) for i in x)
         else:
             return x
-
     return {k: move(v) for k, v in batch.items()}
 
 
@@ -38,20 +37,22 @@ class Trainer:
         net,
         train_dataloader,
         val_dataloader,
-        checkpoint="/content/drive/MyDrive/ConvTasNet/checkpoints",
-        lr=5e-4,
-        clip_norm=5.0,
-        patience=3,
-        factor=0.5,
-        min_lr=1e-6,
-        num_epochs=100,
-        log_interval=100,
+        checkpoint,
+        lr,
+        clip_norm,
+        patience,
+        factor,
+        min_lr,
+        num_epochs,
+        log_interval,
     ):
         os.makedirs(checkpoint, exist_ok=True)
         self.checkpoint = checkpoint
         self.logger = get_logger(os.path.join(checkpoint, "trainer.log"))
 
+        # -----------------------------
         # Device
+        # -----------------------------
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.net = net.to(self.device)
 
@@ -65,12 +66,17 @@ class Trainer:
 
         self.logger.info(f"Model params: {check_parameters(self.net):.2f} M")
 
+        # -----------------------------
         # Data
+        # -----------------------------
         self.train_loader = train_dataloader
         self.val_loader = val_dataloader
 
+        # -----------------------------
         # Optimizer & scheduler
+        # -----------------------------
         self.optimizer = torch.optim.Adam(self.net.parameters(), lr=lr)
+
         self.scheduler = ReduceLROnPlateau(
             self.optimizer,
             mode="min",
@@ -79,14 +85,30 @@ class Trainer:
             min_lr=min_lr,
         )
 
+        # -----------------------------
         # Training config
+        # -----------------------------
         self.clip_norm = clip_norm
         self.num_epochs = num_epochs
         self.log_interval = log_interval
         self.cur_epoch = 0
 
-        # Debug flag
+        # Debug flag (print shapes once)
         self._printed_shapes = False
+
+    # ---------------------------------------------------
+    # Load checkpoint (RESUME)
+    # ---------------------------------------------------
+    def load(self, path):
+        ckpt = torch.load(path, map_location=self.device)
+
+        self.net.load_state_dict(ckpt["model"])
+        self.optimizer.load_state_dict(ckpt["optimizer"])
+        self.cur_epoch = ckpt["epoch"]
+
+        self.logger.info(
+            f"✅ Resumed training from '{path}' at epoch {self.cur_epoch}"
+        )
 
     # ---------------------------------------------------
     # Save checkpoint
@@ -122,7 +144,7 @@ class Trainer:
             self.optimizer.zero_grad(set_to_none=True)
 
             with autocast("cuda", enabled=self.use_amp):
-                # IMPORTANT: mix stays [B, T] for STFT-based Conv-TasNet
+                # IMPORTANT: mix is [B, T] (STFT-based Conv-TasNet)
                 ests = self.net(batch["mix"])
 
             if not self._printed_shapes:
@@ -130,9 +152,9 @@ class Trainer:
                     f"[DEBUG SHAPES] ests (model output): {ests.shape}"
                 )
 
-                # Correct assertions for THIS repo
-                assert batch["mix"].ndim == 2        # [B, T]
-                assert batch["ref"].ndim == 3        # [B, C, T]
+                # Safety checks
+                assert batch["mix"].ndim == 2      # [B, T]
+                assert batch["ref"].ndim == 3      # [B, C, T]
                 assert ests.shape == batch["ref"].shape
 
                 self._printed_shapes = True
@@ -141,17 +163,13 @@ class Trainer:
 
             if self.use_amp:
                 self.scaler.scale(loss).backward()
-
-                if self.clip_norm:
-                    self.scaler.unscale_(self.optimizer)
-                    clip_grad_norm_(self.net.parameters(), self.clip_norm)
-
+                self.scaler.unscale_(self.optimizer)
+                clip_grad_norm_(self.net.parameters(), self.clip_norm)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
                 loss.backward()
-                if self.clip_norm:
-                    clip_grad_norm_(self.net.parameters(), self.clip_norm)
+                clip_grad_norm_(self.net.parameters(), self.clip_norm)
                 self.optimizer.step()
 
             losses.append(loss.item())
